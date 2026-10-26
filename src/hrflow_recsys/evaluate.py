@@ -30,6 +30,11 @@ def evaluate_action_rule(
     return action_accuracy(pred, sessions["action"].tolist())
 
 
+def evaluate_action_model(model, x: pd.DataFrame, y: pd.DataFrame) -> float:
+    sessions = x.merge(y, on="session_id", validate="one_to_one")
+    return action_accuracy(model.predict(sessions), sessions["action"].tolist())
+
+
 def markdown_table(header: tuple[str, ...], rows: dict[str, tuple]) -> str:
     lines = ["| " + " | ".join(header) + " |", "|---" + "|---:" * (len(header) - 1) + "|"]
     for name, values in rows.items():

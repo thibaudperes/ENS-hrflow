@@ -1,7 +1,13 @@
 import time
 
+from hrflow_recsys.action import ActionModel
 from hrflow_recsys.data import load_data
-from hrflow_recsys.evaluate import evaluate_action_rule, evaluate_recommender, markdown_table
+from hrflow_recsys.evaluate import (
+    evaluate_action_model,
+    evaluate_action_rule,
+    evaluate_recommender,
+    markdown_table,
+)
 from hrflow_recsys.metrics import final_score
 from hrflow_recsys.models.baselines import IdNeighbours, Popularity, always_view, last_action
 from hrflow_recsys.models.hybrid import Hybrid
@@ -35,6 +41,8 @@ def main() -> None:
         )
     rules = {"always_view": always_view, "last_action": last_action}
     acc = {name: (evaluate_action_rule(rule, x_val, y_val),) for name, rule in rules.items()}
+    action_model = ActionModel().fit(x_train, y_train)
+    acc["ActionModel"] = (evaluate_action_model(action_model, x_val, y_val),)
 
     cold_header = f"MRR@10 cold start (n={len(y_cold)})"
     print(markdown_table(("recommender", "MRR@10", cold_header, "seconds"), mrr))
