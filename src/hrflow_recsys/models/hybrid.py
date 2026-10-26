@@ -10,7 +10,7 @@ from hrflow_recsys.models.text import TextModel
 
 N_CANDIDATES = 50
 CANDIDATE_GAP = 50
-# Tuned on half A of the val split with scripts/tune_hybrid.py.
+# Tuned on half A of the val split grouped by chain, with scripts/tune_hybrid.py.
 W_MARKOV, W_ID, W_TEXT = 1.0, 0.5, 0.5
 
 

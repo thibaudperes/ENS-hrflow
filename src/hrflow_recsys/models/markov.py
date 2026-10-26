@@ -1,5 +1,5 @@
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 import pandas as pd
 
@@ -17,13 +17,22 @@ class Markov:
     def fit(self, x: pd.DataFrame, y: pd.DataFrame) -> "Markov":
         sessions = x.merge(y, on="session_id", validate="one_to_one")
         self.transitions = defaultdict(Counter)
+        self.out_counts = Counter()
         for job_ids, target in zip(sessions["job_ids"], sessions["job_id"], strict=True):
-            path = list(job_ids) + [target]
-            for a, b in zip(path[:-1], path[1:], strict=True):
-                self.transitions[a][b] += 1
-        self.out_counts = {a: sum(nexts.values()) for a, nexts in self.transitions.items()}
+            self._add(list(job_ids) + [target])
         self.neighbours = IdNeighbours().fit(x, y)
         return self
+
+    def update(self, sequences: Iterable[Sequence[int]]) -> "Markov":
+        """Add the transitions inside new sessions, without their targets."""
+        for job_ids in sequences:
+            self._add(job_ids)
+        return self
+
+    def _add(self, path: Sequence[int]) -> None:
+        for a, b in zip(path[:-1], path[1:], strict=True):
+            self.transitions[a][b] += 1
+            self.out_counts[a] += 1
 
     def votes(self, job_ids: Sequence[int]) -> Counter:
         seen = set(job_ids)

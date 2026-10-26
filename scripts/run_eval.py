@@ -1,5 +1,7 @@
 import time
 
+import pandas as pd
+
 from hrflow_recsys.action import ActionModel
 from hrflow_recsys.data import load_data
 from hrflow_recsys.evaluate import (
@@ -8,17 +10,24 @@ from hrflow_recsys.evaluate import (
     evaluate_recommender,
     markdown_table,
 )
+from hrflow_recsys.fragments import build_chains
 from hrflow_recsys.metrics import final_score
 from hrflow_recsys.models.baselines import IdNeighbours, Popularity, always_view, last_action
 from hrflow_recsys.models.hybrid import Hybrid
 from hrflow_recsys.models.markov import Markov
 from hrflow_recsys.models.text import TextModel
-from hrflow_recsys.split import train_val_split
+from hrflow_recsys.split import grouped_split
+
+
+def online(model: Hybrid, x_new: pd.DataFrame) -> Hybrid:
+    model.markov.update(x_new["job_ids"])
+    return model
 
 
 def main() -> None:
     x, y, _, jobs = load_data()
-    x_train, x_val, y_train, y_val = train_val_split(x, y)
+    chains = build_chains(x, y)
+    x_train, x_val, y_train, y_val = grouped_split(x, y, chains)
     seen = set(x_train["job_ids"].explode()) | set(y_train["job_id"])
     y_cold = y_val[~y_val["job_id"].isin(seen)]
     x_cold = x_val[x_val["session_id"].isin(y_cold["session_id"])]
@@ -29,6 +38,7 @@ def main() -> None:
         "Markov": lambda: Markov().fit(x_train, y_train),
         "TextModel": lambda: TextModel().fit(x_train, y_train, jobs),
         "Hybrid": lambda: Hybrid().fit(x_train, y_train, jobs),
+        "Hybrid + online": lambda: online(Hybrid().fit(x_train, y_train, jobs), x_val),
     }
     mrr = {}
     for name, fit in recommenders.items():

@@ -4,9 +4,10 @@ import pandas as pd
 
 from hrflow_recsys.data import load_data
 from hrflow_recsys.evaluate import BATCH_SIZE, markdown_table
+from hrflow_recsys.fragments import build_chains
 from hrflow_recsys.metrics import mrr_at_k
 from hrflow_recsys.models.hybrid import Hybrid, rank
-from hrflow_recsys.split import train_val_split
+from hrflow_recsys.split import grouped_split
 
 # Only ratios matter, so the Markov weight is fixed to 1.
 ID_WEIGHTS = (0.0, 0.25, 0.5, 1.0, 2.0)
@@ -29,8 +30,9 @@ def mrr(scores: list, targets: list, weights: tuple) -> float:
 def main() -> None:
     start = time.perf_counter()
     x, y, _, jobs = load_data()
-    x_train, x_val, y_train, y_val = train_val_split(x, y)
-    x_a, x_b, y_a, y_b = train_val_split(x_val, y_val, val_frac=0.5)
+    chains = build_chains(x, y)
+    x_train, x_val, y_train, y_val = grouped_split(x, y, chains)
+    x_a, x_b, y_a, y_b = grouped_split(x_val, y_val, chains, val_frac=0.5)
     model = Hybrid().fit(x_train, y_train, jobs)
     half_a, half_b = candidate_scores(model, x_a, y_a), candidate_scores(model, x_b, y_b)
 
