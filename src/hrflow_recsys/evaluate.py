@@ -4,10 +4,21 @@ import pandas as pd
 
 from hrflow_recsys.metrics import action_accuracy, mrr_at_k
 
+BATCH_SIZE = 1000
+
+
+def _recommend_all(model, sessions: list) -> list[list[int]]:
+    if not hasattr(model, "recommend_batch"):
+        return [model.recommend(job_ids) for job_ids in sessions]
+    recs = []
+    for start in range(0, len(sessions), BATCH_SIZE):
+        recs += model.recommend_batch(sessions[start : start + BATCH_SIZE])
+    return recs
+
 
 def evaluate_recommender(model, x: pd.DataFrame, y: pd.DataFrame) -> float:
     sessions = x.merge(y, on="session_id", validate="one_to_one")
-    recs = [model.recommend(job_ids) for job_ids in sessions["job_ids"]]
+    recs = _recommend_all(model, sessions["job_ids"].tolist())
     return mrr_at_k(recs, sessions["job_id"].tolist())
 
 
