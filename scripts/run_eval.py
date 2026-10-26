@@ -2,6 +2,7 @@ from hrflow_recsys.data import load_data
 from hrflow_recsys.evaluate import evaluate_action_rule, evaluate_recommender
 from hrflow_recsys.metrics import final_score
 from hrflow_recsys.models.baselines import IdNeighbours, Popularity, always_view, last_action
+from hrflow_recsys.models.markov import Markov
 from hrflow_recsys.split import train_val_split
 
 
@@ -15,7 +16,11 @@ def main() -> None:
     x, y, _, _ = load_data()
     x_train, x_val, y_train, y_val = train_val_split(x, y)
 
-    recommenders = {"Popularity": Popularity(), "IdNeighbours": IdNeighbours()}
+    recommenders = {
+        "Popularity": Popularity(),
+        "IdNeighbours": IdNeighbours(),
+        "Markov": Markov(),
+    }
     mrr = {
         name: evaluate_recommender(model.fit(x_train, y_train), x_val, y_val)
         for name, model in recommenders.items()
