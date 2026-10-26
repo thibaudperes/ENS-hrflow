@@ -28,3 +28,11 @@ def evaluate_action_rule(
     sessions = x.merge(y, on="session_id", validate="one_to_one")
     pred = [rule(actions) for actions in sessions["actions"]]
     return action_accuracy(pred, sessions["action"].tolist())
+
+
+def markdown_table(header: tuple[str, ...], rows: dict[str, tuple]) -> str:
+    lines = ["| " + " | ".join(header) + " |", "|---" + "|---:" * (len(header) - 1) + "|"]
+    for name, values in rows.items():
+        cells = [f"{v:.4f}" if isinstance(v, float) else str(v) for v in values]
+        lines.append("| " + " | ".join([name, *cells]) + " |")
+    return "\n".join(lines)

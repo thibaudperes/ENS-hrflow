@@ -1,20 +1,13 @@
 import time
 
 from hrflow_recsys.data import load_data
-from hrflow_recsys.evaluate import evaluate_action_rule, evaluate_recommender
+from hrflow_recsys.evaluate import evaluate_action_rule, evaluate_recommender, markdown_table
 from hrflow_recsys.metrics import final_score
 from hrflow_recsys.models.baselines import IdNeighbours, Popularity, always_view, last_action
+from hrflow_recsys.models.hybrid import Hybrid
 from hrflow_recsys.models.markov import Markov
 from hrflow_recsys.models.text import TextModel
 from hrflow_recsys.split import train_val_split
-
-
-def markdown_table(header: tuple[str, ...], rows: dict[str, tuple]) -> str:
-    lines = ["| " + " | ".join(header) + " |", "|---" + "|---:" * (len(header) - 1) + "|"]
-    for name, values in rows.items():
-        cells = [f"{v:.4f}" if isinstance(v, float) else str(v) for v in values]
-        lines.append("| " + " | ".join([name, *cells]) + " |")
-    return "\n".join(lines)
 
 
 def main() -> None:
@@ -29,6 +22,7 @@ def main() -> None:
         "IdNeighbours": lambda: IdNeighbours().fit(x_train, y_train),
         "Markov": lambda: Markov().fit(x_train, y_train),
         "TextModel": lambda: TextModel().fit(x_train, y_train, jobs),
+        "Hybrid": lambda: Hybrid().fit(x_train, y_train, jobs),
     }
     mrr = {}
     for name, fit in recommenders.items():

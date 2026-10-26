@@ -26,7 +26,8 @@ class TextModel:
     def recommend(self, job_ids: Sequence[int]) -> list[int]:
         return self.recommend_batch([job_ids])[0]
 
-    def recommend_batch(self, sessions: Sequence[Sequence[int]]) -> list[list[int]]:
+    def scores(self, sessions: Sequence[Sequence[int]]) -> np.ndarray:
+        """Similarity of each session to every job (sessions x jobs), -inf on seen jobs."""
         rows, cols, weights = [], [], []
         for i, job_ids in enumerate(sessions):
             positions = np.arange(1, len(job_ids) + 1)
@@ -40,6 +41,10 @@ class TextModel:
         # Job vectors are L2-normalised, so the dot product ranks jobs like the cosine.
         scores = (profiles @ self.vectors.T).toarray()
         scores[session_weights.nonzero()] = -np.inf
+        return scores
+
+    def recommend_batch(self, sessions: Sequence[Sequence[int]]) -> list[list[int]]:
+        scores = self.scores(sessions)
         top = np.argpartition(-scores, K, axis=1)[:, :K]
         order = np.argsort(-np.take_along_axis(scores, top, axis=1), axis=1)
         top = np.take_along_axis(top, order, axis=1)

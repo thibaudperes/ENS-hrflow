@@ -25,7 +25,7 @@ class Markov:
         self.neighbours = IdNeighbours().fit(x, y)
         return self
 
-    def recommend(self, job_ids: Sequence[int]) -> list[int]:
+    def votes(self, job_ids: Sequence[int]) -> Counter:
         seen = set(job_ids)
         votes = Counter()
         for weight, job in zip(self.weights, reversed(job_ids), strict=False):
@@ -34,7 +34,10 @@ class Markov:
             for b, count in nexts.items():
                 if b not in seen:
                     votes[b] += weight * count / norm
-        recs = [int(b) for b, _ in votes.most_common(K)]
+        return votes
+
+    def recommend(self, job_ids: Sequence[int]) -> list[int]:
+        recs = [int(b) for b, _ in self.votes(job_ids).most_common(K)]
         # Markov picks go first so they count as seen; the last job stays last for IdNeighbours.
         fill = self.neighbours.recommend(recs + list(job_ids))
         return recs + fill[: K - len(recs)]

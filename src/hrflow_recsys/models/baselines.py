@@ -36,14 +36,18 @@ class IdNeighbours:
         self.clicks = counts.reindex(self.ids).to_numpy()
         return self
 
-    def recommend(self, job_ids: Sequence[int]) -> list[int]:
+    def neighbours(self, job_ids: Sequence[int]) -> list[int]:
+        """Unseen train jobs within max_gap of the last job, closest first."""
         last = job_ids[-1]
         lo, hi = np.searchsorted(self.ids, [last - self.max_gap, last + self.max_gap + 1])
         ids, clicks = self.ids[lo:hi], self.clicks[lo:hi]
-        # Closest id first, ties broken by popularity.
+        # Ties broken by popularity.
         order = np.lexsort((-clicks, np.abs(ids - last)))
         seen = set(job_ids)
-        recs = [int(j) for j in ids[order] if j not in seen][:K]
+        return [int(j) for j in ids[order] if j not in seen]
+
+    def recommend(self, job_ids: Sequence[int]) -> list[int]:
+        recs = self.neighbours(job_ids)[:K]
         fill = self.popularity.recommend(list(job_ids) + recs)
         return recs + fill[: K - len(recs)]
 
