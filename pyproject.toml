@@ -1,7 +1,7 @@
 [project]
 name = "hrflow-recsys"
 version = "0.1.0"
-description = "Add your description here"
+description = "Session-based job recommendation for the ENS Challenge Data x HrFlow.ai"
 readme = "README.md"
 authors = [
     { name = "Thibaud Peres", email = "202183632+thibaudperes@users.noreply.github.com" }
@@ -14,9 +14,6 @@ dependencies = [
     "scipy>=1.18.1",
 ]
 
-[project.scripts]
-hrflow-recsys = "hrflow_recsys:main"
-
 [build-system]
 requires = ["uv_build>=0.12.22,<0.13.0"]
 build-backend = "uv_build"
@@ -25,6 +22,7 @@ build-backend = "uv_build"
 dev = [
     "ipykernel>=7.4.0",
     "matplotlib>=3.11.2",
+    "nbconvert>=7.17.2",
     "pre-commit>=4.7.0",
     "pytest>=9.1.1",
     "ruff>=0.17.2",
