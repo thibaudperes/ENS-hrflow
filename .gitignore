@@ -16,3 +16,6 @@ submissions/
 # local tooling
 .ipynb_checkpoints/
 .DS_Store
+# MLflow (local tracking)
+mlflow.db
+mlruns/

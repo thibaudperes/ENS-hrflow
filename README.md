@@ -114,11 +114,15 @@ Put the challenge files in `data/raw/` (`x_train.csv`, `y_train.csv`, `x_test.cs
 ```bash
 uv sync
 uv run python scripts/run_eval.py         # validation tables
+uv run mlflow ui --port 5001              # browse logged runs at http://127.0.0.1:5001
 uv run python scripts/tune_hybrid.py      # hybrid weight grid, halves A and B
 uv run python scripts/make_submission.py  # submissions/submission_model.csv and submission_leak.csv
 uv run jupyter nbconvert --to notebook --execute --inplace notebooks/01_eda.ipynb
 uv run jupyter nbconvert --to notebook --execute --inplace notebooks/02_session_fragments.ipynb
 ```
+Each `run_eval.py` launch is logged to MLflow (local `mlflow.db`): one parent run with
+the split, one nested run per recommender (MRR@10, cold start MRR@10, time, hybrid weights)
+and per action rule (accuracy), and the final score.
 
 ## Project layout
 

@@ -1,5 +1,6 @@
 import time
 
+import mlflow
 import pandas as pd
 
 from hrflow_recsys.action import ActionModel
@@ -17,6 +18,8 @@ from hrflow_recsys.models.hybrid import Hybrid
 from hrflow_recsys.models.markov import Markov
 from hrflow_recsys.models.text import TextModel
 from hrflow_recsys.split import grouped_split
+
+EXPERIMENT = "hrflow-recsys"
 
 
 def online(model: Hybrid, x_new: pd.DataFrame) -> Hybrid:
@@ -40,27 +43,44 @@ def main() -> None:
         "Hybrid": lambda: Hybrid().fit(x_train, y_train, jobs),
         "Hybrid + online": lambda: online(Hybrid().fit(x_train, y_train, jobs), x_val),
     }
-    mrr = {}
-    for name, fit in recommenders.items():
-        start = time.perf_counter()
-        model = fit()
-        mrr[name] = (
-            evaluate_recommender(model, x_val, y_val),
-            evaluate_recommender(model, x_cold, y_cold),
-            f"{time.perf_counter() - start:.1f}",
+    mlflow.set_experiment(EXPERIMENT)
+    with mlflow.start_run(run_name="run_eval"):
+        mlflow.log_params(
+            {"split": "grouped_by_chain", "n_train": len(x_train), "n_val": len(x_val)}
         )
-    rules = {"always_view": always_view, "last_action": last_action}
-    acc = {name: (evaluate_action_rule(rule, x_val, y_val),) for name, rule in rules.items()}
-    action_model = ActionModel().fit(x_train, y_train)
-    acc["ActionModel"] = (evaluate_action_model(action_model, x_val, y_val),)
+        mrr = {}
+        for name, fit in recommenders.items():
+            with mlflow.start_run(run_name=name, nested=True):
+                start = time.perf_counter()
+                model = fit()
+                val = evaluate_recommender(model, x_val, y_val)
+                cold = evaluate_recommender(model, x_cold, y_cold)
+                seconds = time.perf_counter() - start
+                mlflow.log_param("recommender", name)
+                if hasattr(model, "weights"):
+                    mlflow.log_param("weights", list(model.weights))
+                mlflow.log_metrics({"mrr_at_10": val, "mrr_at_10_cold": cold, "seconds": seconds})
+            mrr[name] = (val, cold, f"{seconds:.1f}")
+
+        rules = {"always_view": always_view, "last_action": last_action}
+        acc = {name: (evaluate_action_rule(rule, x_val, y_val),) for name, rule in rules.items()}
+        action_model = ActionModel().fit(x_train, y_train)
+        acc["ActionModel"] = (evaluate_action_model(action_model, x_val, y_val),)
+        for name, (accuracy,) in acc.items():
+            with mlflow.start_run(run_name=name, nested=True):
+                mlflow.log_param("action_rule", name)
+                mlflow.log_metric("accuracy", accuracy)
+
+        best_rec = max(mrr, key=lambda name: mrr[name][0])
+        best_rule = max(acc, key=lambda name: acc[name][0])
+        score = final_score(mrr[best_rec][0], acc[best_rule][0])
+        mlflow.log_params({"best_recommender": best_rec, "best_action_rule": best_rule})
+        mlflow.log_metric("final_score", score)
 
     cold_header = f"MRR@10 cold start (n={len(y_cold)})"
     print(markdown_table(("recommender", "MRR@10", cold_header, "seconds"), mrr))
     print()
     print(markdown_table(("action rule", "accuracy"), acc))
-    best_rec = max(mrr, key=lambda name: mrr[name][0])
-    best_rule = max(acc, key=lambda name: acc[name][0])
-    score = final_score(mrr[best_rec][0], acc[best_rule][0])
     print(f"\nBest final score: {score:.4f} ({best_rec} + {best_rule})")
 
 
