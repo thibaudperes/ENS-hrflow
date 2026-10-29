@@ -124,6 +124,25 @@ Each `run_eval.py` launch is logged to MLflow (local `mlflow.db`): one parent ru
 the split, one nested run per recommender (MRR@10, cold start MRR@10, time, hybrid weights)
 and per action rule (accuracy), and the final score.
 
+## API
+
+A FastAPI service serves the Hybrid recommender and the last_action rule.
+
+```bash
+uv run python scripts/train_final.py                # fit on all train sessions -> models/hybrid.joblib
+uv run fastapi dev src/hrflow_recsys/serve.py       # http://127.0.0.1:8000/docs
+```
+
+```
+POST /recommend
+{"job_ids": [305, 299, 300], "actions": ["view", "view", "apply"]}
+-> {"job_ids": [ten unseen job ids, best first], "action": "apply"}
+```
+
+Unknown job ids and mismatched lengths are rejected with a 422. The model file is built
+from the challenge data and is not committed. `tests/test_api.py` checks the API with a
+small model fitted on synthetic data, so the CI runs without the challenge files.
+
 ## Project layout
 
 ```
@@ -135,7 +154,8 @@ src/hrflow_recsys/
   data.py  metrics.py  split.py  evaluate.py
   action.py                    action prediction
   fragments.py                 session chains
-  models/                      baselines, markov, text, hybrid
+  models/
+    api.py  serve.py             FastAPI app and its entry point                    baselines, markov, text, hybrid
 tests/
 ```
 

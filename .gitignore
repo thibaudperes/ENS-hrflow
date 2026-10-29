@@ -19,3 +19,5 @@ submissions/
 # MLflow (local tracking)
 mlflow.db
 mlruns/
+# trained models (built from the challenge data)
+models/
