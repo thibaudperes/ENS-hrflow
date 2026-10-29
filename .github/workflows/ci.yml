@@ -27,3 +27,12 @@ jobs:
 
       - name: Tests (pytest)
         run: uv run pytest
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v6
+
+      - name: Construire l'image
+        run: docker build -t hrflow-api .

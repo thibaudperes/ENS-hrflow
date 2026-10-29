@@ -1,0 +1,11 @@
+.git
+.venv
+data
+models
+submissions
+notebooks
+mlflow.db
+mlruns
+__pycache__
+.pytest_cache
+.ruff_cache

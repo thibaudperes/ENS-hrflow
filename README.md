@@ -143,6 +143,13 @@ Unknown job ids and mismatched lengths are rejected with a 422. The model file i
 from the challenge data and is not committed. `tests/test_api.py` checks the API with a
 small model fitted on synthetic data, so the CI runs without the challenge files.
 
+With Docker, the model stays outside the image and is mounted at run time:
+
+```bash
+docker build -t hrflow-api .
+docker run --rm -p 8080:8080 -v "$(pwd)/models:/models" hrflow-api   # http://127.0.0.1:8080/docs
+```
+
 ## Project layout
 
 ```
