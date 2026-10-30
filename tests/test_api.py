@@ -1,3 +1,5 @@
+import json
+
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
@@ -61,3 +63,26 @@ def test_demo_returns_texts():
     assert body["session"][0]["text"] == "Title 1\nSummary of offer 1"
     assert len(body["recommendations"]) == 10
     assert body["action"] == "apply"
+
+
+def test_recommendation_is_logged_as_json(client, capsys):
+    client.post("/recommend", json={"job_ids": [1, 2], "actions": ["view", "apply"]})
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    entry = lines[-1]
+    assert entry["message"] == "recommendation"
+    assert entry["source"] == "api"
+    assert entry["job_ids"] == [1, 2]
+    assert len(entry["recommended"]) == 10
+    assert entry["latency_ms"] >= 0
+
+
+def test_rejection_is_logged(client, capsys):
+    client.post("/recommend", json={"job_ids": [1, 999], "actions": ["view", "view"]})
+    entry = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert entry == {
+        "severity": "INFO",
+        "message": "rejected",
+        "source": "api",
+        "n_jobs": 2,
+        "n_unknown": 1,
+    }
