@@ -5,6 +5,7 @@ from pathlib import Path
 import joblib
 
 from hrflow_recsys.data import load_data
+from hrflow_recsys.drift import session_profile
 from hrflow_recsys.models.hybrid import Hybrid
 
 MODELS_DIR = Path(__file__).resolve().parents[1] / "models"
@@ -40,7 +41,15 @@ def main() -> None:
     }
     (MODELS_DIR / "demo.json").write_text(json.dumps(demo, ensure_ascii=False))
 
-    for name in ("hybrid.joblib", "demo.json"):
+    # Reference for the scheduled drift check: training session profiles, no raw sessions.
+    known_jobs = sorted(int(j) for j in set(x["job_ids"].explode()) | set(y["job_id"]))
+    reference = {
+        "known_jobs": known_jobs,
+        "profile": session_profile(x, set(known_jobs)).round(4).to_dict(orient="list"),
+    }
+    (MODELS_DIR / "reference.json").write_text(json.dumps(reference))
+
+    for name in ("hybrid.joblib", "demo.json", "reference.json"):
         size_mb = (MODELS_DIR / name).stat().st_size / 1e6
         print(f"{name}: {size_mb:.1f} MB")
     print(f"Hybrid fitted on {len(x)} sessions, demo with {N_EXAMPLES} test sessions")
