@@ -126,6 +126,18 @@ and per action rule (accuracy), and the final score.
 
 ## API
 
+**Live demo:** https://hrflow-api-243544005364.europe-west1.run.app/docs
+(Cloud Run, scales to zero: the first call can take ~15 s)
+
+```bash
+curl -X POST https://hrflow-api-243544005364.europe-west1.run.app/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"job_ids": [305, 299, 300], "actions": ["view", "view", "apply"]}'
+```
+
+Deployment: Cloud Build builds the Docker image on every push to `main`, Cloud Run serves it,
+and the model file is mounted read-only from a private Cloud Storage bucket.
+
 A FastAPI service serves the Hybrid recommender and the last_action rule.
 
 ```bash
