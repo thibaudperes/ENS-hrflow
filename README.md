@@ -161,6 +161,24 @@ With Docker, the model stays outside the image and is mounted at run time:
 docker build -t hrflow-api .
 docker run --rm -p 8080:8080 -v "$(pwd)/models:/models" hrflow-api   # http://127.0.0.1:8080/docs
 ```
+## Monitoring
+
+`scripts/check_drift.py` compares incoming sessions with the training sessions.
+Each session is reduced to 7 features (the 5 action features, the median job id,
+the share of jobs never seen in training), and each feature is compared with a
+two-sample Kolmogorov-Smirnov test (drift if p < 0.01).
+
+```bash
+uv run python scripts/check_drift.py
+```
+
+Train vs test of the challenge: no drift on the 6 session features (e.g. mean length
+7.54 vs 7.61). 6.7 % of the jobs opened in test sessions were never seen in training:
+Markov cannot score them and only the text model reaches them. The unseen share is always 0
+in the reference by construction, so in production it should be watched with a plain
+threshold rather than the KS test.
+
+Evidently was not used: its current release does not import with pandas 3.1.
 
 ## Project layout
 
@@ -168,13 +186,14 @@ docker run --rm -p 8080:8080 -v "$(pwd)/models:/models" hrflow-api   # http://12
 notebooks/
   01_eda.ipynb                 data exploration
   02_session_fragments.ipynb   session chains and the leak
-scripts/                       run_eval, tune_hybrid, make_submission
+scripts/                       run_eval, tune_hybrid, make_submission, train_final, check_drift
 src/hrflow_recsys/
   data.py  metrics.py  split.py  evaluate.py
   action.py                    action prediction
   fragments.py                 session chains
-  models/
-    api.py  serve.py             FastAPI app and its entry point                    baselines, markov, text, hybrid
+  models/                      baselines, markov, text, hybrid
+  api.py  serve.py             FastAPI app and its entry point
+  drift.py                     session profile and KS drift test
 tests/
 ```
 
