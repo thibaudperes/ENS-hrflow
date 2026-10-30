@@ -12,6 +12,8 @@ The first call can take ~15 s (the service scales to zero).
 - **Model:** a hybrid of Markov transitions, offer-id proximity and TF-IDF text similarity.
   MRR@10 0.094 on a validation grouped by session chain, against 0.005 for popularity.
   A learned ranker over the same signals nearly doubles MRR@10 on unseen offers (0.025 -> 0.048).
+- **Leaderboard:** 0.3269 on the public test without the leak (11th of 70), where the grouped
+  validation predicted 0.3228; 0.6929 with the session fragment leak (4th of 70).
 - **Rigour:** 60.5 % of train sessions are cut pieces of one browsing. The leak is measured,
   kept out of the model, and the validation is grouped by chain to avoid it.
 - **Production:** FastAPI service, Docker image, GitHub Actions CI on every pull request,
@@ -67,6 +69,17 @@ and last_action (0.3228 with Hybrid + online).
 Separately, exploiting the session fragment leak gives a final score of **0.6916**
 (notebook 02, random split: MRR@10 0.6236, accuracy 0.8501).
 
+**Official public leaderboard** (October 30, 2026, 70 participants including the benchmark):
+
+| submission | validation | public test | rank |
+|---|---:|---:|---:|
+| Hybrid + online, last_action (`submission_model.csv`) | 0.3228 (grouped by chain) | **0.3269** | 11th |
+| Same + fragment leak (`submission_leak.csv`) | 0.6916 (random split) | **0.6929** | 4th |
+| Official benchmark | - | 0.1920 | - |
+
+Both validations predicted the public score within 0.005. The rank without the leak is the
+place that score would take in the public ranking; the leaderboard shows the best submission.
+
 ## Problem
 
 Each session is a sequence of job offers a candidate opened, each with an action (view or apply).
@@ -117,6 +130,8 @@ predict, never their targets. This adds 0.0038 of MRR@10 (grouped by chain).
 
 ## Session fragments
 
+The challenge description states that some long profile sessions were split into several
+smaller sessions without overlap, and that train and test sessions are never linked.
 Many sessions are consecutive pieces of one browsing. Measured on all train sessions: in
 60.5 %, the target is the first job of session s+1, and the action then matches 99.99 % of the time.
 Controls: the same match with s-1 holds for 0.03 % of sessions, with s+2 for 0.01 %.
@@ -130,7 +145,8 @@ Putting the first job of s+1 at rank 1, and keeping last_action, raises the fina
 0.6916 (random split). On the test, links cannot be checked without y. A proxy (first job of
 s+1 within 100 ids of the last job of s) holds for 11.4 % of test sessions against 12.0 % of
 all train sessions, which gives an estimated 56 % of real links in the test, against 60.5 %
-in train.
+in train. The two public scores point to about 58 %, assuming the action accuracy stays at
+85.7 %.
 
 This is an artefact of how the data was cut, not a property of candidate behaviour. It is
 kept out of the model: it lives in `fragments.with_next_first` and only produces
