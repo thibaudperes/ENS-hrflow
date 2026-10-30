@@ -1,6 +1,35 @@
 # HrFlow.ai session-based job recommendation
 
-Predict the next job a candidate clicks, and whether they view or apply, from their browsing session.
+[![CI](https://github.com/thibaudperes/ens-challenge-hrflow-recsys/actions/workflows/ci.yml/badge.svg)](https://github.com/thibaudperes/ens-challenge-hrflow-recsys/actions/workflows/ci.yml)
+
+Predict the next job offers a candidate will open, and whether they will view or apply,
+from their browsing session (ENS Challenge Data × HrFlow.ai).
+
+**[Live demo](https://hrflow-api-243544005364.europe-west1.run.app/)**: a real test session
+and the 10 offers the model recommends next, with their titles.
+The first call can take ~15 s (the service scales to zero).
+
+- **Model:** a hybrid of Markov transitions, offer-id proximity and TF-IDF text similarity.
+  MRR@10 0.094 on a validation grouped by session chain, against 0.005 for popularity.
+- **Rigour:** 60.5 % of train sessions are cut pieces of one browsing. The leak is measured,
+  kept out of the model, and the validation is grouped by chain to avoid it.
+- **Production:** FastAPI service, Docker image, GitHub Actions CI on every pull request,
+  continuous deployment to Google Cloud Run, experiments tracked with MLflow, input drift check.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    data[Challenge data<br/>local only] --> train[train_final.py]
+    data --> eval[run_eval.py]
+    eval --> mlflow[MLflow<br/>runs and metrics]
+    train --> bucket[(Cloud Storage<br/>private bucket<br/>hybrid.joblib, demo.json)]
+    repo[GitHub repo] --> ci[GitHub Actions<br/>ruff, pytest, docker build]
+    repo -->|push to main| build[Cloud Build<br/>Docker image]
+    build --> run[Cloud Run<br/>FastAPI]
+    bucket -->|mounted read-only on /models| run
+    run --> users[Demo page and<br/>POST /recommend]
+```
 
 ## Results
 
@@ -106,28 +135,16 @@ kept out of the model: it lives in `fragments.with_next_first` and only produces
   transition counts helps overall (+0.004 MRR), but not on unseen targets
   (0.026 -> 0.025). I expected it to help there and it didn't.
 
-## Reproduce
+## Production
 
-Put the challenge files in `data/raw/` (`x_train.csv`, `y_train.csv`, `x_test.csv`,
-`job_listings.json`). They are not provided: download them after registering for the challenge.
+**Service.** A FastAPI app serves the Hybrid recommender and the last_action rule.
 
-```bash
-uv sync
-uv run python scripts/run_eval.py         # validation tables
-uv run mlflow ui --port 5001              # browse logged runs at http://127.0.0.1:5001
-uv run python scripts/tune_hybrid.py      # hybrid weight grid, halves A and B
-uv run python scripts/make_submission.py  # submissions/submission_model.csv and submission_leak.csv
-uv run jupyter nbconvert --to notebook --execute --inplace notebooks/01_eda.ipynb
-uv run jupyter nbconvert --to notebook --execute --inplace notebooks/02_session_fragments.ipynb
-```
-Each `run_eval.py` launch is logged to MLflow (local `mlflow.db`): one parent run with
-the split, one nested run per recommender (MRR@10, cold start MRR@10, time, hybrid weights)
-and per action rule (accuracy), and the final score.
-
-## API
-
-**Live demo:** https://hrflow-api-243544005364.europe-west1.run.app/docs
-(Cloud Run, scales to zero: the first call can take ~15 s)
+| endpoint | what it does |
+|---|---|
+| `GET /` | demo page: a random test session and its 10 recommended offers |
+| `POST /recommend` | session in, 10 unseen job ids (best first) and the next action out |
+| `GET /demo/random` | the data behind the demo page, with offer titles and summaries |
+| `GET /health` | liveness check |
 
 ```bash
 curl -X POST https://hrflow-api-243544005364.europe-west1.run.app/recommend \
@@ -135,50 +152,58 @@ curl -X POST https://hrflow-api-243544005364.europe-west1.run.app/recommend \
   -d '{"job_ids": [305, 299, 300], "actions": ["view", "view", "apply"]}'
 ```
 
-Deployment: Cloud Build builds the Docker image on every push to `main`, Cloud Run serves it,
-and the model file is mounted read-only from a private Cloud Storage bucket.
+Unknown job ids and mismatched lengths are rejected with a 422. `tests/test_api.py` checks the
+API with a small model fitted on synthetic data, so the CI runs without the challenge files.
 
-A FastAPI service serves the Hybrid recommender and the last_action rule.
+**Deployment.** `scripts/train_final.py` fits the Hybrid on all train sessions and writes
+`models/hybrid.joblib` and `models/demo.json` (offer snippets and 50 test sessions). Both files
+are built from the challenge data and are not committed: they live in a private Cloud Storage
+bucket, mounted read-only on `/models` by Cloud Run. The Docker image holds only the code and
+its locked dependencies. Every push to `main` triggers Cloud Build, which builds the image and
+deploys a new revision.
+
+**Quality gates.** `main` is protected: changes go through pull requests, and the `tests` job
+(ruff, ruff format, pytest on dependencies locked with uv) must pass before merging. A second
+job builds the Docker image.
+
+**Experiment tracking.** Each `run_eval.py` launch is logged to MLflow (local `mlflow.db`): one
+parent run with the split, one nested run per recommender (MRR@10, cold start MRR@10, time,
+hybrid weights) and per action rule (accuracy), and the final score.
+
+**Monitoring.** `scripts/check_drift.py` compares incoming sessions with the training sessions.
+Each session is reduced to 7 features (the 5 action features, the median job id, the share of
+jobs never seen in training), and each feature is compared with a two-sample Kolmogorov-Smirnov
+test (drift if p < 0.01). Train vs test of the challenge: no drift on the 6 session features
+(e.g. mean length 7.54 vs 7.61). 6.7 % of the jobs opened in test sessions were never seen in
+training: Markov cannot score them and only the text model reaches them. The unseen share is
+always 0 in the reference by construction, so in production it should be watched with a plain
+threshold rather than the KS test. Evidently was not used: its current release does not import
+with pandas 3.1.
+
+## Reproduce
+
+Put the challenge files in `data/raw/` (`x_train.csv`, `y_train.csv`, `x_test.csv`,
+`job_listings.json`). They are not provided: download them after registering for the challenge.
 
 ```bash
-uv run python scripts/train_final.py                # fit on all train sessions -> models/hybrid.joblib
-uv run fastapi dev src/hrflow_recsys/serve.py       # http://127.0.0.1:8000/docs
+uv sync
+uv run python scripts/run_eval.py         # validation tables, logged to MLflow
+uv run mlflow ui --port 5001              # browse logged runs at http://127.0.0.1:5001
+uv run python scripts/tune_hybrid.py      # hybrid weight grid, halves A and B
+uv run python scripts/make_submission.py  # submissions/submission_model.csv and submission_leak.csv
+uv run python scripts/check_drift.py      # train vs test drift table
+uv run jupyter nbconvert --to notebook --execute --inplace notebooks/01_eda.ipynb
+uv run jupyter nbconvert --to notebook --execute --inplace notebooks/02_session_fragments.ipynb
 ```
 
-```
-POST /recommend
-{"job_ids": [305, 299, 300], "actions": ["view", "view", "apply"]}
--> {"job_ids": [ten unseen job ids, best first], "action": "apply"}
-```
-
-Unknown job ids and mismatched lengths are rejected with a 422. The model file is built
-from the challenge data and is not committed. `tests/test_api.py` checks the API with a
-small model fitted on synthetic data, so the CI runs without the challenge files.
-
-With Docker, the model stays outside the image and is mounted at run time:
+Run the API locally, directly or with Docker (the model files stay outside the image):
 
 ```bash
+uv run python scripts/train_final.py              # models/hybrid.joblib and models/demo.json
+uv run fastapi dev src/hrflow_recsys/serve.py     # http://127.0.0.1:8000
 docker build -t hrflow-api .
-docker run --rm -p 8080:8080 -v "$(pwd)/models:/models" hrflow-api   # http://127.0.0.1:8080/docs
+docker run --rm -p 8080:8080 -v "$(pwd)/models:/models" hrflow-api   # http://127.0.0.1:8080
 ```
-## Monitoring
-
-`scripts/check_drift.py` compares incoming sessions with the training sessions.
-Each session is reduced to 7 features (the 5 action features, the median job id,
-the share of jobs never seen in training), and each feature is compared with a
-two-sample Kolmogorov-Smirnov test (drift if p < 0.01).
-
-```bash
-uv run python scripts/check_drift.py
-```
-
-Train vs test of the challenge: no drift on the 6 session features (e.g. mean length
-7.54 vs 7.61). 6.7 % of the jobs opened in test sessions were never seen in training:
-Markov cannot score them and only the text model reaches them. The unseen share is always 0
-in the reference by construction, so in production it should be watched with a plain
-threshold rather than the KS test.
-
-Evidently was not used: its current release does not import with pandas 3.1.
 
 ## Project layout
 
@@ -193,8 +218,10 @@ src/hrflow_recsys/
   fragments.py                 session chains
   models/                      baselines, markov, text, hybrid
   api.py  serve.py             FastAPI app and its entry point
+  demo_page.py                 HTML of the demo page
   drift.py                     session profile and KS drift test
 tests/
+Dockerfile  .github/workflows/ci.yml
 ```
 
 ## Limits and next steps
@@ -202,3 +229,4 @@ tests/
 - No sequence model such as GRU4Rec or SASRec: transitions are first order, over the last 3 jobs.
 - Hybrid weights come from a simple grid of 30 combinations; a learned ranker could replace it.
 - Action accuracy is stuck around 85 %: session features add nothing beyond the last action.
+- The drift check runs by hand on the challenge test set; the API does not log incoming sessions yet.
