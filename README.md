@@ -15,7 +15,9 @@ The first call can take ~15 s (the service scales to zero).
 - **Rigour:** 60.5 % of train sessions are cut pieces of one browsing. The leak is measured,
   kept out of the model, and the validation is grouped by chain to avoid it.
 - **Production:** FastAPI service, Docker image, GitHub Actions CI on every pull request,
-  continuous deployment to Google Cloud Run, experiments tracked with MLflow, input drift check.
+  continuous deployment to Google Cloud Run, experiments tracked with MLflow.
+- **Monitoring:** every request is logged as structured JSON; a scheduled job runs a drift test
+  on the logged sessions every day and an email alert fires on drift or on a failed check.
 
 ## Architecture
 
@@ -24,12 +26,18 @@ flowchart LR
     data[Challenge data<br/>local only] --> train[train_final.py]
     data --> eval[run_eval.py]
     eval --> mlflow[MLflow<br/>runs and metrics]
-    train --> bucket[(Cloud Storage<br/>private bucket<br/>hybrid.joblib, demo.json)]
+    train --> bucket[(Cloud Storage<br/>private bucket<br/>hybrid.joblib, demo.json,<br/>reference.json)]
     repo[GitHub repo] --> ci[GitHub Actions<br/>ruff, pytest, docker build]
     repo -->|push to main| build[Cloud Build<br/>Docker image]
     build --> run[Cloud Run<br/>FastAPI]
     bucket -->|mounted read-only on /models| run
     run --> users[Demo page and<br/>POST /recommend]
+    run -->|one JSON line per request| logs[Cloud Logging]
+    scheduler[Cloud Scheduler<br/>daily 7:17 Paris] --> job[Cloud Run job<br/>drift check]
+    logs --> job
+    bucket -->|reference.json| job
+    job -->|drift_check line| logs
+    logs -->|WARNING or ERROR| alert[Cloud Monitoring<br/>email alert]
 ```
 
 ## Results
@@ -158,6 +166,9 @@ kept out of the model: it lives in `fragments.with_next_first` and only produces
 
 **Service.** A FastAPI app serves the Hybrid recommender and the last_action rule. The
 Ranker is not deployed yet: same overall MRR@10, three times longer to train.
+Each request writes one JSON line on stdout, which Cloud Run stores in Cloud Logging as a
+structured entry: `recommendation` (source `api` or `demo`, session job ids and actions, the 10
+recommended ids, the action, latency in ms) or `rejected` (number of jobs and of unknown jobs).
 
 | endpoint | what it does |
 |---|---|
@@ -176,11 +187,12 @@ Unknown job ids and mismatched lengths are rejected with a 422. `tests/test_api.
 API with a small model fitted on synthetic data, so the CI runs without the challenge files.
 
 **Deployment.** `scripts/train_final.py` fits the Hybrid on all train sessions and writes
-`models/hybrid.joblib` and `models/demo.json` (offer snippets and 50 test sessions). Both files
-are built from the challenge data and are not committed: they live in a private Cloud Storage
-bucket, mounted read-only on `/models` by Cloud Run. The Docker image holds only the code and
-its locked dependencies. Every push to `main` triggers Cloud Build, which builds the image and
-deploys a new revision.
+`models/hybrid.joblib`, `models/demo.json` (offer snippets and 50 test sessions) and
+`models/reference.json` (job ids seen in training and the profile of each training session,
+used by the drift check). The files are built from the challenge data and are not committed:
+they live in a private Cloud Storage bucket, mounted read-only on `/models` by Cloud Run. The
+Docker image holds only the code and its locked dependencies. Every push to `main` triggers
+Cloud Build, which builds the image and deploys a new revision.
 
 **Quality gates.** `main` is protected: changes go through pull requests, and the `tests` job
 (ruff, ruff format, pytest on dependencies locked with uv) must pass before merging. A second
@@ -190,15 +202,26 @@ job builds the Docker image.
 parent run with the split, one nested run per recommender (MRR@10, cold start MRR@10, time,
 hybrid weights) and per action rule (accuracy), and the final score.
 
-**Monitoring.** `scripts/check_drift.py` compares incoming sessions with the training sessions.
-Each session is reduced to 7 features (the 5 action features, the median job id, the share of
-jobs never seen in training), and each feature is compared with a two-sample Kolmogorov-Smirnov
-test (drift if p < 0.01). Train vs test of the challenge: no drift on the 6 session features
-(e.g. mean length 7.54 vs 7.61). 6.7 % of the jobs opened in test sessions were never seen in
-training: Markov cannot score them and only the text model reaches them. The unseen share is
-always 0 in the reference by construction, so in production it should be watched with a plain
-threshold rather than the KS test. Evidently was not used: its current release does not import
-with pandas 3.1.
+**Monitoring.** Each session is reduced to 7 features (the 5 action features, the median job
+id, the share of jobs never seen in training). Two checks use them:
+
+- `scripts/check_drift.py`, by hand: challenge train vs test. Two-sample Kolmogorov-Smirnov test
+  per feature (drift if p < 0.01). No drift on the 6 session features (e.g. mean length 7.54 vs
+  7.61); 6.7 % of the jobs opened in test sessions were never seen in training. That share is
+  always 0 in the reference by construction, so it is watched with a plain threshold (20 %)
+  rather than the KS test.
+- `hrflow_recsys.monitoring`, in production: a Cloud Run job built from the same image runs
+  `python -m hrflow_recsys.monitoring` every day at 7:17 (Paris time), triggered by Cloud
+  Scheduler. It reads the `recommendation` entries of the last 7 days from Cloud Logging, runs
+  the same tests against `reference.json` and writes one `drift_check` line: severity WARNING on
+  drift, INFO otherwise, `not_enough_sessions` below 30 sessions. A Cloud Monitoring log alert
+  emails me on a WARNING line or on any error of the job, so a check that stops running is
+  noticed too. First run, 41 sessions: no drift (lowest p-value 0.057 on the median job id),
+  2.9 % unseen jobs.
+
+The job's service account only has read roles: Storage Object Viewer on the model bucket and
+Logs Viewer on the project. Evidently was not used: its current release does not import with
+pandas 3.1.
 
 ## Reproduce
 
@@ -219,10 +242,25 @@ uv run jupyter nbconvert --to notebook --execute --inplace notebooks/02_session_
 Run the API locally, directly or with Docker (the model files stay outside the image):
 
 ```bash
-uv run python scripts/train_final.py              # models/hybrid.joblib and models/demo.json
+uv run python scripts/train_final.py              # models/hybrid.joblib, demo.json, reference.json
 uv run fastapi dev src/hrflow_recsys/serve.py     # http://127.0.0.1:8000
 docker build -t hrflow-api .
 docker run --rm -p 8080:8080 -v "$(pwd)/models:/models" hrflow-api   # http://127.0.0.1:8080
+```
+
+Monitoring on Google Cloud (project `labo-mlops`, region `europe-west1`), after creating the
+`hrflow-drift-check` Cloud Run job from the API image with the command
+`python -m hrflow_recsys.monitoring` and the bucket mounted read-only on `/models`:
+
+```bash
+gcloud projects add-iam-policy-binding labo-mlops \
+  --member="serviceAccount:<compute service account>" --role="roles/logging.viewer"
+gcloud run jobs execute hrflow-drift-check --region=europe-west1 --wait
+gcloud scheduler jobs create http hrflow-drift-daily --location=europe-west1 \
+  --schedule="17 7 * * *" --time-zone="Europe/Paris" --http-method=POST \
+  --uri="https://run.googleapis.com/v2/projects/labo-mlops/locations/europe-west1/jobs/hrflow-drift-check:run" \
+  --oauth-service-account-email="<compute service account>"
+gcloud beta monitoring policies create --policy-from-file=alert.yaml   # log alert: drift_check WARNING or job ERROR
 ```
 
 ## Project layout
@@ -240,6 +278,7 @@ src/hrflow_recsys/
   api.py  serve.py             FastAPI app and its entry point
   demo_page.py                 HTML of the demo page
   drift.py                     session profile and KS drift test
+  monitoring.py                scheduled drift check on the logged sessions (Cloud Run job)
 tests/
 Dockerfile  .github/workflows/ci.yml
 ```
@@ -249,4 +288,7 @@ Dockerfile  .github/workflows/ci.yml
 - No sequence model such as GRU4Rec or SASRec: transitions are first order, over the last 3 jobs.
 - The learned ranker is evaluated but not served: deploying it would help cold start offers.
 - Action accuracy is stuck around 85 %: session features add nothing beyond the last action.
-- The drift check runs by hand on the challenge test set; the API does not log incoming sessions yet.
+- Live traffic is mostly the demo page, which replays 50 test sessions: the drift check is wired
+  end to end, but it has not seen real candidate behaviour.
+- The drift job runs a fixed image digest: unlike the API, it is not redeployed on each push.
+- Request logs keep job ids and actions only (no user id), and Cloud Logging keeps them 30 days.
