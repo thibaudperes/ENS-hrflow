@@ -16,13 +16,14 @@ from hrflow_recsys.metrics import final_score
 from hrflow_recsys.models.baselines import IdNeighbours, Popularity, always_view, last_action
 from hrflow_recsys.models.hybrid import Hybrid
 from hrflow_recsys.models.markov import Markov
+from hrflow_recsys.models.ranker import Ranker
 from hrflow_recsys.models.text import TextModel
 from hrflow_recsys.split import grouped_split
 
 EXPERIMENT = "hrflow-recsys"
 
 
-def online(model: Hybrid, x_new: pd.DataFrame) -> Hybrid:
+def online(model: Hybrid | Ranker, x_new: pd.DataFrame) -> Hybrid | Ranker:
     model.markov.update(x_new["job_ids"])
     return model
 
@@ -42,6 +43,8 @@ def main() -> None:
         "TextModel": lambda: TextModel().fit(x_train, y_train, jobs),
         "Hybrid": lambda: Hybrid().fit(x_train, y_train, jobs),
         "Hybrid + online": lambda: online(Hybrid().fit(x_train, y_train, jobs), x_val),
+        "Ranker": lambda: Ranker().fit(x_train, y_train, jobs),
+        "Ranker + online": lambda: online(Ranker().fit(x_train, y_train, jobs), x_val),
     }
     mlflow.set_experiment(EXPERIMENT)
     with mlflow.start_run(run_name="run_eval"):

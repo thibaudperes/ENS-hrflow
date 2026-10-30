@@ -19,5 +19,5 @@ submissions/
 # MLflow (local tracking)
 mlflow.db
 mlruns/
-# trained models (built from the challenge data)
-models/
+# trained models (built from the challenge data), root folder only
+/models/

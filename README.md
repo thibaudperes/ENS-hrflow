@@ -11,6 +11,7 @@ The first call can take ~15 s (the service scales to zero).
 
 - **Model:** a hybrid of Markov transitions, offer-id proximity and TF-IDF text similarity.
   MRR@10 0.094 on a validation grouped by session chain, against 0.005 for popularity.
+  A learned ranker over the same signals nearly doubles MRR@10 on unseen offers (0.025 -> 0.048).
 - **Rigour:** 60.5 % of train sessions are cut pieces of one browsing. The leak is measured,
   kept out of the model, and the validation is grouped by chain to avoid it.
 - **Production:** FastAPI service, Docker image, GitHub Actions CI on every pull request,
@@ -43,6 +44,8 @@ Validation: 20 % of train sessions, grouped by chain of session fragments (see b
 | TextModel | 0.0263 | 0.0178 |
 | Hybrid | 0.0899 | 0.0259 |
 | Hybrid + online | 0.0937 | 0.0247 |
+| Ranker | 0.0904 | 0.0488 |
+| Ranker + online | 0.0939 | 0.0478 |
 
 | action rule | accuracy |
 |---|---:|
@@ -50,8 +53,8 @@ Validation: 20 % of train sessions, grouped by chain of session fragments (see b
 | last_action | 0.8574 |
 | ActionModel | 0.8558 |
 
-Final score (0.7 x MRR@10 + 0.3 x accuracy), grouped by chain: **0.3228** with Hybrid + online
-and last_action.
+Final score (0.7 x MRR@10 + 0.3 x accuracy), grouped by chain: **0.3230** with Ranker + online
+and last_action (0.3228 with Hybrid + online).
 
 Separately, exploiting the session fragment leak gives a final score of **0.6916**
 (notebook 02, random split: MRR@10 0.6236, accuracy 0.8501).
@@ -84,6 +87,18 @@ and the top 50 text matches. Each has three scores (Markov vote, id proximity, t
 similarity), divided by their max in the session. Weights (1, 0.5, 0.5) were picked from
 a grid of 30 on half A of the validation (MRR@10 0.0917) and checked on half B (0.0880),
 both halves grouped by chain.
+
+**Learned ranker.** Instead of fixed weights, a gradient boosting classifier
+(scikit-learn `HistGradientBoostingClassifier`) scores each Hybrid candidate from 9 features:
+the three normalised scores, the raw Markov votes, the size and the direction of the id gap
+to the last job, the raw text similarity, the offer popularity and the session length. The
+label is 1 for the real next job, 0 for the other candidates. To avoid leakage, the training
+sessions are split again by chain: the Hybrid is fitted on 70 % and builds the candidates of
+the other 30 %, on which the classifier learns. Otherwise Markov would already have counted
+the target transition and the classifier would learn to trust it too much. Overall MRR@10 is
+the same as the Hybrid (0.0939 vs 0.0937, with online update), but on cold start targets it
+goes from 0.025 to 0.048: with no Markov vote, the classifier relies on the text and the id
+gap direction, where the fixed weights cannot adapt. Training takes about 65 s against 20 s.
 
 **Action.** Repeating the last action of the session is right 85.7 % of the time (grouped by
 chain). A logistic regression on 5 session features (last action, final streak, apply share,
@@ -135,9 +150,14 @@ kept out of the model: it lives in `fragments.with_next_first` and only produces
   transition counts helps overall (+0.004 MRR), but not on unseen targets
   (0.026 -> 0.025). I expected it to help there and it didn't.
 
+- **A learned ranker for the overall score.** Replacing the hand-picked weights with a
+  classifier did not move the overall MRR@10 (0.0937 -> 0.0939). The gain is only on
+  unseen offers. The 30-combination grid was already close to the best linear mix.
+
 ## Production
 
-**Service.** A FastAPI app serves the Hybrid recommender and the last_action rule.
+**Service.** A FastAPI app serves the Hybrid recommender and the last_action rule. The
+Ranker is not deployed yet: same overall MRR@10, three times longer to train.
 
 | endpoint | what it does |
 |---|---|
@@ -216,7 +236,7 @@ src/hrflow_recsys/
   data.py  metrics.py  split.py  evaluate.py
   action.py                    action prediction
   fragments.py                 session chains
-  models/                      baselines, markov, text, hybrid
+  models/                      baselines, markov, text, hybrid, ranker
   api.py  serve.py             FastAPI app and its entry point
   demo_page.py                 HTML of the demo page
   drift.py                     session profile and KS drift test
@@ -227,6 +247,6 @@ Dockerfile  .github/workflows/ci.yml
 ## Limits and next steps
 
 - No sequence model such as GRU4Rec or SASRec: transitions are first order, over the last 3 jobs.
-- Hybrid weights come from a simple grid of 30 combinations; a learned ranker could replace it.
+- The learned ranker is evaluated but not served: deploying it would help cold start offers.
 - Action accuracy is stuck around 85 %: session features add nothing beyond the last action.
 - The drift check runs by hand on the challenge test set; the API does not log incoming sessions yet.
