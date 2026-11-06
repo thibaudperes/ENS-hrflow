@@ -1,0 +1,11 @@
+{
+  "n_sessions": 15882,
+  "target_is_first_job_of": {
+    "s-1": 0.0002518574486840448,
+    "s+1": 0.6054023422742728,
+    "s+2": 0.0001259287243420224
+  },
+  "n_chains": 6267,
+  "median_chain_length": 2.0,
+  "max_chain_length": 14
+}
