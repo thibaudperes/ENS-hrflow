@@ -1,0 +1,9 @@
+{
+  "date": "2026-10-30",
+  "n_participants": 70,
+  "benchmark": 0.192,
+  "submissions": {
+    "model": {"label": "Hybrid + online, last_action", "validation": 0.3228, "public": 0.3269, "rank": 11},
+    "leak": {"label": "Same + fragment leak", "validation": 0.6916, "public": 0.6929, "rank": 4}
+  }
+}

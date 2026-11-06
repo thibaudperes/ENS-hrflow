@@ -1,17 +1,46 @@
 # HrFlow.ai session-based job recommendation
 
-[![CI](https://github.com/thibaudperes/ens-challenge-hrflow-recsys/actions/workflows/ci.yml/badge.svg)](https://github.com/thibaudperes/ens-challenge-hrflow-recsys/actions/workflows/ci.yml)
+[![CI](https://github.com/thibaudperes/ENS-hrflow/actions/workflows/ci.yml/badge.svg)](https://github.com/thibaudperes/ENS-hrflow/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Predict the next job offers a candidate will open, and whether they will view or apply,
-from their browsing session (ENS Challenge Data × HrFlow.ai).
+from their browsing session ([ENS Challenge Data × HrFlow.ai](https://challengedata.ens.fr/challenges/164)).
 
-**[Live demo](https://hrflow-api-243544005364.europe-west1.run.app/)**: a real test session
-and the 10 offers the model recommends next, with their titles.
-The first call can take ~15 s (the service scales to zero).
+<p align="center">
+  <img src="reports/figures/g_demo.gif" width="720" alt="Live demo page: a test session on the left, the 10 offers the model recommends next on the right">
+  <br><em>The <a href="https://hrflow-api-243544005364.europe-west1.run.app/">live demo</a>: a real test session and the 10 offers my model recommends next.</em>
+</p>
+
+<p align="center">
+  <strong>Live API on Google Cloud Run</strong> · <strong>11th/70 without the leak, 4th/70 with it</strong> · <strong>validation predicts the public score within 0.005</strong>
+</p>
+
+**TL;DR**
+
+- HrFlow.ai wants to guess which job offers a candidate will open next, from the offers they just browsed.
+- I built a recommender that combines browsing habits, the order offers are listed in and their text, and put it online as a live web service.
+- I found a flaw in how the data was cut that inflates scores, measured it, and kept it out of the model so the results stay honest.
+- It ranks 11th of 70 without the flaw (4th with it), and my own validation predicted the official score within 0.005.
+
+## What this project shows
+
+| Skill | Evidence |
+|---|---|
+| Recommender systems | Markov transitions, offer-id proximity, TF-IDF, a hybrid and a learned ranker: [Results](#results), [Approach](#approach) |
+| Leakage detection | 60.5 % of targets are the first job of the next session, with s-1 and s+2 as controls: [Session fragments](#session-fragments) |
+| Rigorous validation | Validation grouped by chain of sessions, which predicted both public scores within 0.005: [Session fragments](#session-fragments), [Leaderboard](#leaderboard) |
+| MLOps | FastAPI, Docker, GitHub Actions CI, continuous deployment to Google Cloud Run: [Production](#production) |
+| Monitoring and drift detection | One JSON log line per request, a daily drift test and an email alert: [Monitoring](#monitoring) |
+| Experiment tracking | One MLflow run per recommender and action rule: [Experiment tracking](#experiment-tracking) |
+
+## Summary
+
+The first call to the [live demo](https://hrflow-api-243544005364.europe-west1.run.app/) can take
+about 15 s (the service scales to zero).
 
 - **Model:** a hybrid of Markov transitions, offer-id proximity and TF-IDF text similarity.
   MRR@10 0.094 on a validation grouped by session chain, against 0.005 for popularity.
-  A learned ranker over the same signals nearly doubles MRR@10 on unseen offers (0.025 -> 0.048).
+  A learned ranker over the same signals nearly doubles MRR@10 on unseen offers (0.025 to 0.048).
 - **Leaderboard:** 0.3269 on the public test without the leak (11th of 70), where the grouped
   validation predicted 0.3228; 0.6929 with the session fragment leak (4th of 70).
 - **Rigour:** 60.5 % of train sessions are cut pieces of one browsing. The leak is measured,
@@ -44,7 +73,13 @@ flowchart LR
 
 ## Results
 
-Validation: 20 % of train sessions, grouped by chain of session fragments (see below).
+Validation: 20 % of train sessions, grouped by chain of session fragments (see
+[Session fragments](#session-fragments)).
+
+<p align="center">
+  <img src="reports/figures/a_mrr_by_model.png" width="720" alt="MRR@10 of eight recommenders, overall and on cold start targets">
+  <br><em>From popularity to the submitted hybrid (green) and the learned ranker (violet). On offers never seen in training, the ranker nearly doubles the score.</em>
+</p>
 
 | recommender | MRR@10 | MRR@10 cold start (n=259) |
 |---|---:|---:|
@@ -69,13 +104,25 @@ and last_action (0.3228 with Hybrid + online).
 Separately, exploiting the session fragment leak gives a final score of **0.6916**
 (notebook 02, random split: MRR@10 0.6236, accuracy 0.8501).
 
+### Leaderboard
+
 **Official public leaderboard** (October 30, 2026, 70 participants including the benchmark):
+
+<p align="center">
+  <img src="reports/figures/f_leaderboard.png" width="720" alt="Public scores of the benchmark, my model and my model with the leak, with ranks">
+  <br><em>Public scores and ranks, against the official benchmark.</em>
+</p>
 
 | submission | validation | public test | rank |
 |---|---:|---:|---:|
 | Hybrid + online, last_action (`submission_model.csv`) | 0.3228 (grouped by chain) | **0.3269** | 11th |
 | Same + fragment leak (`submission_leak.csv`) | 0.6916 (random split) | **0.6929** | 4th |
 | Official benchmark | - | 0.1920 | - |
+
+<p align="center">
+  <img src="reports/figures/e_validation_vs_public.png" width="560" alt="Validation score against public score for the two submissions, both on the diagonal">
+  <br><em>Both submissions sit on the diagonal: my validation is a reliable guide to the hidden test.</em>
+</p>
 
 Both validations predicted the public score within 0.005. The rank without the leak is the
 place that score would take in the public ranking; the leaderboard shows the best submission.
@@ -88,6 +135,10 @@ Score = 0.7 x MRR@10 + 0.3 x accuracy. Data: 15,882 train and 1,819 test session
 
 Challenge page: https://challengedata.ens.fr/challenges/164
 
+No challenge file is published here: the data is available to registered participants only.
+The figures show rates, scores and a schematic; the demo GIF shows what the public demo page
+displays.
+
 ## Approach
 
 **Baselines.** Popularity recommends the most clicked jobs. IdNeighbours recommends the
@@ -95,7 +146,12 @@ jobs whose id is closest to the last job, then fills with popularity. Jobs alrea
 the session are always excluded: only 0.6 % of targets are in the session history (all train
 sessions, notebook 01).
 
-**Markov.** Transitions are counted between consecutive jobs, plus last job -> target.
+<p align="center">
+  <img src="reports/figures/d_id_gaps.png" width="720" alt="Distribution of the gap between the target offer id and the last offer id, and its cumulative share against random offers">
+  <br><em>The next offer is very often the previous id in the list: candidates scroll through offers in the order they are listed (notebook 01).</em>
+</p>
+
+**Markov.** Transitions are counted between consecutive jobs, plus last job to target.
 The last 3 jobs of the session vote for their successors with weights 1, 0.5 and 0.25.
 Missing slots are filled with IdNeighbours.
 
@@ -137,9 +193,19 @@ Many sessions are consecutive pieces of one browsing. Measured on all train sess
 Controls: the same match with s-1 holds for 0.03 % of sessions, with s+2 for 0.01 %.
 The 15,882 train sessions form 6,267 chains of up to 14 sessions.
 
+<p align="center">
+  <img src="reports/figures/b_session_fragment_leak.png" width="720" alt="Schematic of a browsing cut into sessions, and the share of targets equal to the first job of sessions s-1, s+1 and s+2">
+  <br><em>The target of a session is the first job of the next one in 60.5 % of cases, and almost never for s-1 or s+2.</em>
+</p>
+
 A random split puts pieces of the same browsing on both sides. MRR@10 goes from 0.0890
 (random split) to 0.0794 (grouped by chain) for Markov, and from 0.0990 to 0.0899 for Hybrid.
 The grouped split is the reference validation.
+
+<p align="center">
+  <img src="reports/figures/c_random_vs_grouped.png" width="720" alt="MRR@10 of Markov and Hybrid under a random split and a split grouped by chain">
+  <br><em>A random split rewards the models for having seen the other half of the same browsing. Grouping by chain removes that.</em>
+</p>
 
 Putting the first job of s+1 at rank 1, and keeping last_action, raises the final score to
 0.6916 (random split). On the test, links cannot be checked without y. A proxy (first job of
@@ -172,19 +238,24 @@ kept out of the model: it lives in `fragments.with_next_first` and only produces
 
 - **Online updates for cold start.** Feeding the validation sequences back into the
   transition counts helps overall (+0.004 MRR), but not on unseen targets
-  (0.026 -> 0.025). I expected it to help there and it didn't.
+  (0.026 to 0.025). I expected it to help there and it didn't.
 
 - **A learned ranker for the overall score.** Replacing the hand-picked weights with a
-  classifier did not move the overall MRR@10 (0.0937 -> 0.0939). The gain is only on
+  classifier did not move the overall MRR@10 (0.0937 to 0.0939). The gain is only on
   unseen offers. The 30-combination grid was already close to the best linear mix.
 
 ## Production
 
-**Service.** A FastAPI app serves the Hybrid recommender and the last_action rule. The
+### Service
+
+A FastAPI app serves the Hybrid recommender and the last_action rule. The
 Ranker is not deployed yet: same overall MRR@10, three times longer to train.
 Each request writes one JSON line on stdout, which Cloud Run stores in Cloud Logging as a
 structured entry: `recommendation` (source `api` or `demo`, session job ids and actions, the 10
 recommended ids, the action, latency in ms) or `rejected` (number of jobs and of unknown jobs).
+
+<details>
+<summary>API endpoints and an example call</summary>
 
 | endpoint | what it does |
 |---|---|
@@ -202,7 +273,11 @@ curl -X POST https://hrflow-api-243544005364.europe-west1.run.app/recommend \
 Unknown job ids and mismatched lengths are rejected with a 422. `tests/test_api.py` checks the
 API with a small model fitted on synthetic data, so the CI runs without the challenge files.
 
-**Deployment.** `scripts/train_final.py` fits the Hybrid on all train sessions and writes
+</details>
+
+### Deployment
+
+`scripts/train_final.py` fits the Hybrid on all train sessions and writes
 `models/hybrid.joblib`, `models/demo.json` (offer snippets and 50 test sessions) and
 `models/reference.json` (job ids seen in training and the profile of each training session,
 used by the drift check). The files are built from the challenge data and are not committed:
@@ -210,16 +285,27 @@ they live in a private Cloud Storage bucket, mounted read-only on `/models` by C
 Docker image holds only the code and its locked dependencies. Every push to `main` triggers
 Cloud Build, which builds the image and deploys a new revision.
 
-**Quality gates.** `main` is protected: changes go through pull requests, and the `tests` job
+### Quality gates
+
+`main` is protected: changes go through pull requests, and the `tests` job
 (ruff, ruff format, pytest on dependencies locked with uv) must pass before merging. A second
 job builds the Docker image.
 
-**Experiment tracking.** Each `run_eval.py` launch is logged to MLflow (local `mlflow.db`): one
+### Experiment tracking
+
+Each `run_eval.py` launch is logged to MLflow (local `mlflow.db`): one
 parent run with the split, one nested run per recommender (MRR@10, cold start MRR@10, time,
 hybrid weights) and per action rule (accuracy), and the final score.
 
-**Monitoring.** Each session is reduced to 7 features (the 5 action features, the median job
-id, the share of jobs never seen in training). Two checks use them:
+### Monitoring
+
+Each session is reduced to 7 features (the 5 action features, the median job
+id, the share of jobs never seen in training). A manual check compares the challenge train and
+test sessions, and a daily job in production compares the logged sessions with the training
+reference. An email alert fires on drift or when the job fails.
+
+<details>
+<summary>Monitoring in detail</summary>
 
 - `scripts/check_drift.py`, by hand: challenge train vs test. Two-sample Kolmogorov-Smirnov test
   per feature (drift if p < 0.01). No drift on the 6 session features (e.g. mean length 7.54 vs
@@ -239,6 +325,8 @@ The job's service account only has read roles: Storage Object Viewer on the mode
 Logs Viewer on the project. Evidently was not used: its current release does not import with
 pandas 3.1.
 
+</details>
+
 ## Reproduce
 
 Put the challenge files in `data/raw/` (`x_train.csv`, `y_train.csv`, `x_test.csv`,
@@ -246,13 +334,23 @@ Put the challenge files in `data/raw/` (`x_train.csv`, `y_train.csv`, `x_test.cs
 
 ```bash
 uv sync
-uv run python scripts/run_eval.py         # validation tables, logged to MLflow
+uv run python scripts/run_eval.py         # validation tables, logged to MLflow, results/validation.json
 uv run mlflow ui --port 5001              # browse logged runs at http://127.0.0.1:5001
 uv run python scripts/tune_hybrid.py      # hybrid weight grid, halves A and B
 uv run python scripts/make_submission.py  # submissions/submission_model.csv and submission_leak.csv
 uv run python scripts/check_drift.py      # train vs test drift table
 uv run jupyter nbconvert --to notebook --execute --inplace notebooks/01_eda.ipynb
 uv run jupyter nbconvert --to notebook --execute --inplace notebooks/02_session_fragments.ipynb
+```
+
+Rebuild the figures. `make_aggregates.py` needs the challenge files; `make_figures.py` only reads
+the aggregates in `results/`, so it runs on a fresh clone:
+
+```bash
+uv run python scripts/make_aggregates.py            # results/fragments.json, id_gaps.json, split_comparison.json
+uv run python scripts/make_figures.py               # reports/figures/*.png
+uv run --group demo playwright install chromium
+uv run --group demo python scripts/record_demo.py   # reports/figures/g_demo.gif, from the live demo
 ```
 
 Run the API locally, directly or with Docker (the model files stay outside the image):
@@ -264,7 +362,10 @@ docker build -t hrflow-api .
 docker run --rm -p 8080:8080 -v "$(pwd)/models:/models" hrflow-api   # http://127.0.0.1:8080
 ```
 
-Monitoring on Google Cloud (project `labo-mlops`, region `europe-west1`), after creating the
+<details>
+<summary>Monitoring setup on Google Cloud</summary>
+
+Project `labo-mlops`, region `europe-west1`, after creating the
 `hrflow-drift-check` Cloud Run job from the API image with the command
 `python -m hrflow_recsys.monitoring` and the bucket mounted read-only on `/models`:
 
@@ -279,13 +380,16 @@ gcloud scheduler jobs create http hrflow-drift-daily --location=europe-west1 \
 gcloud beta monitoring policies create --policy-from-file=alert.yaml   # log alert: drift_check WARNING or job ERROR
 ```
 
+</details>
+
 ## Project layout
 
 ```
 notebooks/
   01_eda.ipynb                 data exploration
   02_session_fragments.ipynb   session chains and the leak
-scripts/                       run_eval, tune_hybrid, make_submission, train_final, check_drift
+scripts/                       run_eval, tune_hybrid, make_submission, train_final, check_drift,
+                               make_aggregates, make_figures, record_demo
 src/hrflow_recsys/
   data.py  metrics.py  split.py  evaluate.py
   action.py                    action prediction
@@ -295,6 +399,9 @@ src/hrflow_recsys/
   demo_page.py                 HTML of the demo page
   drift.py                     session profile and KS drift test
   monitoring.py                scheduled drift check on the logged sessions (Cloud Run job)
+  viz.py                       figure style and palette
+results/                       aggregates behind the figures (rates and scores only)
+reports/figures/               README figures and the demo GIF
 tests/
 Dockerfile  .github/workflows/ci.yml
 ```
@@ -308,3 +415,10 @@ Dockerfile  .github/workflows/ci.yml
   end to end, but it has not seen real candidate behaviour.
 - The drift job runs a fixed image digest: unlike the API, it is not redeployed on each push.
 - Request logs keep job ids and actions only (no user id), and Cloud Logging keeps them 30 days.
+
+## Credits and license
+
+Challenge and data by [HrFlow.ai](https://hrflow.ai) and [ENS Challenge Data](https://challengedata.ens.fr/challenges/164).
+
+The code is released under the [MIT license](LICENSE). The data belongs to HrFlow.ai and the
+challenge organisers: it is not included here and is not covered by this license.

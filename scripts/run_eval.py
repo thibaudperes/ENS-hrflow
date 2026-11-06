@@ -1,4 +1,6 @@
+import json
 import time
+from pathlib import Path
 
 import mlflow
 import pandas as pd
@@ -21,6 +23,7 @@ from hrflow_recsys.models.text import TextModel
 from hrflow_recsys.split import grouped_split
 
 EXPERIMENT = "hrflow-recsys"
+RESULTS = Path("results")
 
 
 def online(model: Hybrid | Ranker, x_new: pd.DataFrame) -> Hybrid | Ranker:
@@ -79,6 +82,16 @@ def main() -> None:
         score = final_score(mrr[best_rec][0], acc[best_rule][0])
         mlflow.log_params({"best_recommender": best_rec, "best_action_rule": best_rule})
         mlflow.log_metric("final_score", score)
+
+    RESULTS.mkdir(exist_ok=True)
+    validation = {
+        "n_val": len(y_val),
+        "n_cold": len(y_cold),
+        "mrr_at_10": {name: val for name, (val, _, _) in mrr.items()},
+        "mrr_at_10_cold": {name: cold for name, (_, cold, _) in mrr.items()},
+        "accuracy": {name: accuracy for name, (accuracy,) in acc.items()},
+    }
+    (RESULTS / "validation.json").write_text(json.dumps(validation, indent=2) + "\n")
 
     cold_header = f"MRR@10 cold start (n={len(y_cold)})"
     print(markdown_table(("recommender", "MRR@10", cold_header, "seconds"), mrr))

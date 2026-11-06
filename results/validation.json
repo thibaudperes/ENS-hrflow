@@ -1,0 +1,29 @@
+{
+  "n_val": 3218,
+  "n_cold": 259,
+  "mrr_at_10": {
+    "Popularity": 0.00518881884637012,
+    "IdNeighbours": 0.021610090068760048,
+    "Markov": 0.07942513342606568,
+    "TextModel": 0.02629911608314343,
+    "Hybrid": 0.08994766541379343,
+    "Hybrid + online": 0.09367977250979115,
+    "Ranker": 0.09041638304379138,
+    "Ranker + online": 0.09392467469689347
+  },
+  "mrr_at_10_cold": {
+    "Popularity": 0.0,
+    "IdNeighbours": 0.0,
+    "Markov": 0.0,
+    "TextModel": 0.017846417846417845,
+    "Hybrid": 0.025942268799411656,
+    "Hybrid + online": 0.02469816755531041,
+    "Ranker": 0.048841698841698845,
+    "Ranker + online": 0.04781209781209781
+  },
+  "accuracy": {
+    "always_view": 0.5885643256681169,
+    "last_action": 0.8573648228713486,
+    "ActionModel": 0.855811062771908
+  }
+}

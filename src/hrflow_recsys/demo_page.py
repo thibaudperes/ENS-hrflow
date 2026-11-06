@@ -70,7 +70,7 @@ DEMO_HTML = """<!doctype html>
     <button id="go">Another session</button>
     <span class="links">
       <a href="/docs">API docs</a>
-      <a href="https://github.com/thibaudperes/ens-challenge-hrflow-recsys">Code on GitHub</a>
+      <a href="https://github.com/thibaudperes/ENS-hrflow">Code on GitHub</a>
     </span>
   </div>
   <div class="grid">
